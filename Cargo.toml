@@ -1,0 +1,12 @@
+[package]
+name = "jyframe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+base64 = "0.22.1"
+chrono = "0.4.38"
+hmac = "0.12.1"
+regex = "1.11.1"
+sha1 = "0.10.6"
+tauri = { version = "2.1.0", features = [] }
