@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use log as logger;
 
 /// 应用状态
 #[derive(Default)]
@@ -16,13 +17,21 @@ impl AppState {
     pub fn get_ep_ca_port(state: &State<'_, Arc<Mutex<AppState>>>) -> i32 {
         match state.lock() {
             Ok(app_state) => app_state.ep_ca_port,
-            Err(..) => 0,
+            Err(err) =>  {
+                logger::error!("try to lock app state failed: {}", err);
+                0
+            },
         }
     }
     /// 重新设置新点驱动测试端口号
     pub fn set_ep_ca_port(port: i32, state: &State<'_, Arc<Mutex<AppState>>>) {
-        if let Ok(mut app_state) = state.lock() {
-            app_state.ep_ca_port = port;
+        match state.lock() {
+            Ok(mut app_state) => {
+                app_state.ep_ca_port = port;
+            },
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+            }
         }
     }
 }
