@@ -19,6 +19,10 @@ pub struct AppState {
     pub log_dir: String,
     /// 日志文件名称
     pub log_file_name: String,
+    /// pdf签章和哈希临时目录
+    pub pdf_digest_sign_dir: String,
+    /// pdf验签临时目录
+    pub pdf_verify_dir: String,
 }
 impl AppState {
     /// 初始化数据
@@ -155,6 +159,44 @@ impl AppState {
     pub fn set_log_file_name(file_name: &str, state: &Arc<Mutex<AppState>>) {
         match state.lock() {
             Ok(mut app_state) => app_state.log_file_name = file_name.to_string(),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+            }
+        }
+    }
+    /// 获取pdf签章哈希临时目录
+    pub fn get_pdf_digest_sign_dir(state: &Arc<Mutex<AppState>>) -> String {
+        match state.lock() {
+            Ok(app_state) => String::from(&app_state.pdf_digest_sign_dir),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+                String::from("")
+            }
+        }
+    }
+    /// 设置pdf签章哈希临时目录
+    pub fn set_pdf_digest_sign_dir(dir: &str, state: &Arc<Mutex<AppState>>) {
+        match state.lock() {
+            Ok(mut app_state) => app_state.pdf_digest_sign_dir = dir.to_string(),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+            }
+        }
+    }
+    /// 获取pdf验签临时目录
+    pub fn get_pdf_verify_dir(state: &Arc<Mutex<AppState>>) -> String {
+        match state.lock() {
+            Ok(app_state) => String::from(&app_state.pdf_verify_dir),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+                String::from("")
+            }
+        }
+    }
+    /// 设置pdf验签临时目录
+    pub fn set_pdf_verify_dir(dir: &str, state: &Arc<Mutex<AppState>>) {
+        match state.lock() {
+            Ok(mut app_state) => app_state.pdf_verify_dir = dir.to_string(),
             Err(err) => {
                 logger::error!("try to lock app state failed: {}", err);
             }
