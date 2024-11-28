@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 base64 = "0.22.1"
 chrono = "0.4.38"
+hex = "0.4.3"
 hmac = "0.12.1"
 http = "1.1.0"
 hyper = "1.5.1"
@@ -15,5 +16,7 @@ reqwest = "0.12.9"
 serde = "1.0.215"
 serde_json = "1.0.133"
 sha1 = "0.10.6"
+sm3 = "0.4.2"
 tauri = { version = "2.1.0", features = [] }
 tauri-plugin-log = "2.0.2"
+uuid = { version = "1.11.0", features = ["v4"] }

@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{path::PathBuf, str::FromStr, sync::{Arc, Mutex}};
 use log as logger;
 
 /// 应用状态
@@ -23,6 +23,8 @@ pub struct AppState {
     pub pdf_digest_sign_dir: String,
     /// pdf验签临时目录
     pub pdf_verify_dir: String,
+    /// java执行参数文件目录
+    pub java_args_dir: String,
 }
 impl AppState {
     /// 初始化数据
@@ -182,6 +184,17 @@ impl AppState {
                 logger::error!("try to lock app state failed: {}", err);
             }
         }
+        match PathBuf::from_str(dir) {
+            Ok(dir_path) => {
+                if !dir_path.exists() {
+                    match std::fs::create_dir_all(dir_path) {
+                        Ok(_) => (),
+                        Err(err) => logger::error!("error occured when create dir【{}】: {}", dir, err),
+                    }
+                }
+            },
+            Err(err) => logger::error!("error occured when convert dir【{}】 to path: {}", dir, err),
+        }
     }
     /// 获取pdf验签临时目录
     pub fn get_pdf_verify_dir(state: &Arc<Mutex<AppState>>) -> String {
@@ -200,6 +213,47 @@ impl AppState {
             Err(err) => {
                 logger::error!("try to lock app state failed: {}", err);
             }
+        }
+        match PathBuf::from_str(dir) {
+            Ok(dir_path) => {
+                if !dir_path.exists() {
+                    match std::fs::create_dir_all(dir_path) {
+                        Ok(_) => (),
+                        Err(err) => logger::error!("error occured when create dir【{}】: {}", dir, err),
+                    }
+                }
+            },
+            Err(err) => logger::error!("error occured when convert dir【{}】 to path: {}", dir, err),
+        }
+    }
+    /// 获取java执行参数文件目录
+    pub fn get_java_args_dir(state: &Arc<Mutex<AppState>>) -> String {
+        match state.lock() {
+            Ok(app_state) => String::from(&app_state.java_args_dir),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+                String::from("")
+            }
+        }
+    }
+    /// 设置java执行参数文件目录
+    pub fn set_java_args_dir(dir: &str, state: &Arc<Mutex<AppState>>) {
+        match state.lock() {
+            Ok(mut app_state) => app_state.java_args_dir = dir.to_string(),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+            }
+        }
+        match PathBuf::from_str(dir) {
+            Ok(dir_path) => {
+                if !dir_path.exists() {
+                    match std::fs::create_dir_all(dir_path) {
+                        Ok(_) => (),
+                        Err(err) => logger::error!("error occured when create dir【{}】: {}", dir, err),
+                    }
+                }
+            },
+            Err(err) => logger::error!("error occured when convert dir【{}】 to path: {}", dir, err),
         }
     }
 }

@@ -1,7 +1,7 @@
 use base64::Engine;
 use hmac::Mac;
 use log as logger;
-use std::{ffi::CStr, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}};
+use std::{ffi::CStr, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}, collections::HashMap};
 use tauri::Manager;
 
 /// token工具类
@@ -15,7 +15,7 @@ impl TokenUtil {
     }
     /// 生成token
     pub fn create_key_secret_token(app_key: &str, app_secret: &str, timeout: i32) -> String {
-        let mut final_time = chrono::Utc::now();
+        let mut final_time = chrono::Local::now();
         let seconds = chrono::Duration::seconds(timeout as i64);
         final_time = final_time + seconds;
         let p1 = (final_time.timestamp_millis() / 1000).to_string();
@@ -123,8 +123,10 @@ impl LogUtil {
             crate::AppState::set_data_dir(&data_dir.to_string_lossy(), &app_state_reuse);
             let pdf_ds_dir: PathBuf = [&data_dir.to_string_lossy(), "pdfTemp", "ds"].iter().collect();
             let pdf_vr_dir: PathBuf = [&data_dir.to_string_lossy(), "pdfTemp", "vr"].iter().collect();
+            let java_args_dir: PathBuf = [&data_dir.to_string_lossy(), "javaArgs"].iter().collect();
             crate::AppState::set_pdf_digest_sign_dir(&pdf_ds_dir.to_string_lossy(), &app_state_reuse);
             crate::AppState::set_pdf_verify_dir(&pdf_vr_dir.to_string_lossy(), &app_state_reuse);
+            crate::AppState::set_java_args_dir(&java_args_dir.to_string_lossy(), &app_state_reuse);
             // 生产环境下使用%app_data%/appName/logs作为日志文件夹
             if !cfg!(debug_assertions) {
                 custom_log_path = [&data_dir.to_string_lossy(), "logs"].iter().collect();
@@ -253,6 +255,7 @@ impl JavaCommander {
 pub struct JavaUtil;
 impl JavaUtil {
     pub fn spawn_java(commander: JavaCommander) -> String {
+        logger::info!("执行java命令：{}\n命令参数：{:?}", &commander.command.to_str().unwrap_or(""), commander.get_args());
         let mut cmd = Command::new(&commander.command);
         match cmd.args(&commander.get_args()).output() {
             Ok(output) => {
@@ -273,18 +276,144 @@ impl JavaUtil {
         }
         String::from("")
     }
-    pub fn make_spawn_command(state: &Arc<Mutex<crate::AppState>>, func_name: &str, mut func_arg: serde_json::Value) -> JavaCommander {
+    pub fn make_spawn_command(state: &Arc<Mutex<crate::AppState>>, func_name: &str, func_arg: serde_json::Value) -> JavaCommander {
+        let mut args_obj: serde_json::Value = func_arg.clone();
+        args_obj["cmd"] = serde_json::json!(func_name.to_string());
+        // 尝试把参数写入到文件，如果写入失败的话使用原参数
+        let args_file_name = format!("{}-{}.arg", func_name, chrono::Local::now().format("%Y%m%d%H%M%S%3f").to_string());
+        let args_path: PathBuf = [&crate::AppState::get_java_args_dir(&state), args_file_name.as_str()].iter().collect();
+        match std::fs::write(args_path.clone(), func_arg.to_string().as_bytes()) {
+            Ok(_) => {
+                args_obj = serde_json::json!({
+                    "cmd": func_name.to_string(),
+                    "argPath": args_path.to_string_lossy().to_string(),
+                });
+            },
+            Err(err) => {
+                logger::error!("error occured when write java arguments to file, will use original args: {}", err);
+            }
+        }
         let java_path: PathBuf = [&crate::AppState::get_resource_dir(&state), "extraResources", "java", "jre", "bin", "javaw.exe"].iter().collect();
         let jar_path: PathBuf = [&crate::AppState::get_resource_dir(&state), "extraResources", "java", "file-tender-jar-1.0.0.jar"].iter().collect();
-        func_arg["cmd"] = serde_json::json!(func_name.to_string());
         JavaCommander { 
             command: java_path.clone(), 
             args: vec![
                 "-Dfile.encoding=UTF-8".to_string(),
                 "-jar".to_string(),
                 jar_path.to_string_lossy().to_string(),
-                base64::engine::general_purpose::STANDARD.encode(func_arg.to_string().as_bytes()),
+                base64::engine::general_purpose::STANDARD.encode(args_obj.to_string().as_bytes()),
             ] 
         }
+    }
+}
+
+/// 中招基础工具类
+pub struct ZhongZhaoUtil;
+impl ZhongZhaoUtil {
+    pub const DEFAULT_ACCESS_SECRET: &str = "B32D22CABBB24963A42F10FFF49CF779";
+    pub const DEFAULT_CLIENT_ID: &str = "Z0010020035";
+    pub const DEFAULT_CLIENT_SECRET: &str = "D5BEA3E0F5A64BD19CB374C1876F1026";
+    pub const DEFAULT_SERVICE_URL: &str = "http://218.60.154.155:8877/cashare/";
+    pub const DEFAULT_TRADING_SYSTEM_CODE: &str = "X2100000027";
+    pub const DEFAULT_SIGNATURE_SECRET: &str = "B32D22CABBB24963A42F10FFF49CF779";
+    pub const DEFAULT_JWT_KEY: &str = "8784od7belusyfuw7oiq4i0mbzacxp32";
+    pub const DEFAULT_JWT_TRADING_SYSTEM_KEY: &str = "8784od7belusyfuw7oiq4i0mbzacxp32";
+
+    /// 内部方法，中招通用请求
+    pub async fn zz_common_request(body: &str, feature_code: &str) -> serde_json::Value {
+        let headers = ZhongZhaoUtil::zz_make_headers(ZhongZhaoUtil::DEFAULT_CLIENT_ID, ZhongZhaoUtil::DEFAULT_CLIENT_SECRET, ZhongZhaoUtil::DEFAULT_TRADING_SYSTEM_CODE, 
+            feature_code, "electronicSealSignature", "V1.0.0", body, ZhongZhaoUtil::DEFAULT_SIGNATURE_SECRET);
+        let client = reqwest::Client::new();
+        let mut form = HashMap::new();
+        form.insert("businessData", body);
+        logger::debug!("request to zz server, the headers is {:?} and the body is {:?}", &headers, &form);
+        match client.post(format!("{}/CAShare/Components", ZhongZhaoUtil::DEFAULT_SERVICE_URL)).headers(headers).form(&form).send().await {
+            Ok(res) => {
+                match res.json::<serde_json::Value>().await {
+                    Ok(rtn) => {
+                        return rtn.clone();
+                    },
+                    Err(err) => {
+                        logger::error!("try to convert zz response to json object failed: {}", err);
+                    }
+                }
+            },
+            Err(err) => {
+                logger::error!("try to request zz server {} failed: {}", format!("{}/CAShare/Components", ZhongZhaoUtil::DEFAULT_SERVICE_URL), err);
+            }
+        }
+        serde_json::json!({})
+    }
+
+    /// 内部方法，中招生成通用请求header
+    pub fn zz_make_headers(client_id: &'static str, client_secret: &'static str, trading_system_code: &'static str, 
+        feature_code: &str, service_code: &'static str, version: &'static str, 
+        body: &str, signature_secret: &'static str) -> reqwest::header::HeaderMap 
+    {
+        let curr_time = chrono::Local::now();
+        let time_stamp = curr_time.timestamp_millis().to_string();
+        let request_uuid = uuid::Uuid::new_v4();
+        let authorization = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", client_id, client_secret).as_bytes()));
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append("x-sdk-invoke-type", reqwest::header::HeaderValue::from_static("common"));
+        headers.append("ServiceCode", reqwest::header::HeaderValue::from_static(service_code));
+        if let Ok(hv_feature_code) = reqwest::header::HeaderValue::from_str(feature_code) {
+            headers.append("FeatureCode", hv_feature_code);
+        }
+        headers.append("Version", reqwest::header::HeaderValue::from_static(version));
+        headers.append("TradingSystemCode", reqwest::header::HeaderValue::from_static(trading_system_code));
+        if let Ok(hv_timestamp) = reqwest::header::HeaderValue::from_str(&time_stamp) {
+            headers.append("Timestamp", hv_timestamp);
+        }
+        if let Ok(hv_request_uuid) = reqwest::header::HeaderValue::from_str(&request_uuid.to_string()) {
+            headers.append("Nonce", hv_request_uuid);
+        }
+        if let Ok(hv_authorization) = reqwest::header::HeaderValue::from_str(&authorization) {
+            headers.append("Authorization", hv_authorization);
+        }
+        if let Ok(hv_signature) = reqwest::header::HeaderValue::from_str(
+            &ZhongZhaoUtil::zz_cal_signature(body, &time_stamp, &request_uuid.to_string(), &authorization, feature_code, service_code, version, signature_secret)
+        ) {
+            headers.append("Signature", hv_signature);
+        }
+        headers
+    }
+
+    /// 内部方法，计算中招的请求签名
+    pub fn zz_cal_signature(body: &str, time_stamp: &str, request_uuid: &str, authorization: &str, 
+        feature_code: &str, service_code: &str, version: &str, signature_secret: &str) -> String 
+    {
+        let mut vec_message: Vec<String> = vec![];
+        vec_message.push(format!("{}={}", "Authorization", authorization));
+        vec_message.push(format!("{}={}", "FeatureCode", feature_code));
+        vec_message.push(format!("{}={}", "Nonce", request_uuid));
+        vec_message.push(format!("{}={}", "ServiceCode", service_code));
+        vec_message.push(format!("{}={}", "Timestamp", time_stamp));
+        vec_message.push(format!("{}={}", "Version", version));
+        vec_message.push(format!("{}={}", "businessData", body));
+        let message = format!("{}{}{}", vec_message.join(","), &time_stamp[0..3], &request_uuid[0..3]);
+        match hmac::Hmac::<sm3::Sm3>::new_from_slice(signature_secret.as_bytes()) {
+            Ok(mut hmac) => {
+                hmac.update(message.as_bytes());
+                let rtn = hex::encode(hmac.finalize().into_bytes());
+                return rtn;
+            },
+            Err(err) => {
+                logger::error!("hmac-sm3 hash failed: {}", err);
+            }
+        }
+        String::from("")
+    }
+
+    /// 内部方法，生成cebs属性对象
+    pub fn zz_build_cebs() -> serde_json::Value {
+        serde_json::json!({
+            "accessKeySecret": ZhongZhaoUtil::DEFAULT_ACCESS_SECRET,
+            "clientId": ZhongZhaoUtil::DEFAULT_CLIENT_ID,
+            "clientSecret": ZhongZhaoUtil::DEFAULT_CLIENT_SECRET,
+            "tradingSystemCode": ZhongZhaoUtil::DEFAULT_TRADING_SYSTEM_CODE,
+            "serviceUrl": ZhongZhaoUtil::DEFAULT_SERVICE_URL,
+            "signatureSecret": ZhongZhaoUtil::DEFAULT_SIGNATURE_SECRET,
+        })
     }
 }
