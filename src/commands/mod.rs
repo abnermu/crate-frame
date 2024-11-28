@@ -1,4 +1,7 @@
 use serde::{Serialize, Deserialize};
+use std::sync::{Arc, Mutex};
+use tauri::State;
+use crate::AppState;
 
 /// 响应code
 #[repr(i32)]
@@ -41,4 +44,11 @@ impl<T> Response<T> {
 #[tauri::command]
 pub fn jy_frame_open_devtool(window: tauri::WebviewWindow) {
     window.open_devtools();
+}
+
+/// 获取HTTP端口号
+#[tauri::command]
+pub fn jy_frame_local_port(state: State<'_, Arc<Mutex<AppState>>>) -> Result<u16, String> {
+    let local_port = AppState::get_local_port(&state);
+    Ok(if local_port == 0 {20080} else {local_port})
 }
