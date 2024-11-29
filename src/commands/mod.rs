@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{AppHandle, State, Config};
 use crate::AppState;
 
 /// 响应code
@@ -51,4 +51,11 @@ pub fn jy_frame_open_devtool(window: tauri::WebviewWindow) {
 pub fn jy_frame_local_port(state: State<'_, Arc<Mutex<AppState>>>) -> Result<u16, String> {
     let local_port = AppState::get_local_port(&state);
     Ok(if local_port == 0 {20080} else {local_port})
+}
+
+/// 获取deeplink插件配置
+#[tauri::command]
+pub fn jy_frame_config(app: AppHandle) -> Result<Config, String> {
+    let config = app.config().clone();
+    Ok(config)
 }
