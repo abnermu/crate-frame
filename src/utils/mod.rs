@@ -103,8 +103,23 @@ impl TokenUtil {
     }
     /// 进行3des加密
     pub fn encrypt_desede(data: &str, key: Vec<u8>) -> String {
-        let cipher_vec: Vec<u8> = easydes::easydes::triple_des_ecb(&key, &mut data.as_bytes().to_vec(), easydes::easydes::Des::Encrypt);
+        let mut data_bytes: Vec<u8> = data.as_bytes().to_vec();
+        TokenUtil::pkcs5padding_data(&mut data_bytes);
+        let cipher_vec: Vec<u8> = easydes::easydes::triple_des_ecb(&key, &mut data_bytes, easydes::easydes::Des::Encrypt);
         base64::engine::general_purpose::STANDARD.encode(cipher_vec)
+    }
+    /// 手动进行数据填充
+    fn pkcs5padding_data(input: &mut Vec<u8>) {
+        if input.len() % 8 != 0 {
+            let len: usize = input.len();
+            let rest_length: usize = 8 - len % 8;
+            let mut padding: Vec<u8> = vec![rest_length as u8; rest_length];
+            input.append(&mut padding);
+        }
+        else {
+            let mut padding: Vec<u8> = vec![0x08 as u8; 8];
+            input.append(&mut padding);
+        }
     }
     /// 获取3des加密用的key
     fn get_desede_key(key: &str) -> Vec<u8> {
