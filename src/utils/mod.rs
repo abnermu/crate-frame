@@ -3,6 +3,7 @@ use hmac::Mac;
 use log as logger;
 use std::{ffi::CStr, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}, collections::HashMap};
 use tauri::Manager;
+use asn1_rs::ToDer;
 
 /// token工具类
 pub struct TokenUtil;
@@ -34,6 +35,85 @@ impl TokenUtil {
                 return String:: from("");
             },
         }
+    }
+    /// 生成云库接口token(SM2方式)
+    pub fn create_cloud_token_default(app_key: &str, enc_pub_key: &str, sign_pri_key: &str) -> String {
+        TokenUtil::create_cloud_token(app_key, enc_pub_key, sign_pri_key, TokenUtil::TOKEN_VALID_MINUTES * 60)
+    }
+    /// 生成云库接口token(SM2方式)
+    pub fn create_cloud_token(app_key: &str, enc_pub_key: &str, sign_pri_key: &str, timeout: i32) -> String {
+        let mut final_time = chrono::Local::now();
+        let seconds = chrono::Duration::seconds(timeout as i64);
+        final_time = final_time + seconds;
+        // key转为bytes
+        match (hex::decode(enc_pub_key), hex::decode(sign_pri_key)) {
+            (Ok(pub_key_bytes), Ok(pri_key_bytes)) => {
+                // key由bytes形式转为实际的key实例
+                match (gm_sm2::key::Sm2PublicKey::new(&pub_key_bytes), gm_sm2::key::Sm2PrivateKey::new(&pri_key_bytes)) {
+                    (Ok(pub_key), Ok(pri_key)) => {
+                        // 加密时间戮
+                        match pub_key.encrypt(final_time.timestamp_millis().to_string().as_bytes(), false, gm_sm2::key::Sm2Model::C1C3C2) {
+                            Ok(enc_data) => {
+                                // 针对appKey + 时间戮 签名
+                                let data_to_sign = format!("{}{}", app_key, final_time.timestamp_millis().to_string());
+                                match pri_key.sign(None, data_to_sign.as_bytes()) {
+                                    Ok(sig) => {
+                                        // 签名值转为asn1形式
+                                        let mut vec_signature: Vec<u8> = Vec::new();
+                                        let r_bytes = &sig[0..32];
+                                        let s_bytes = &sig[32..64];
+                                        let mut r_pre: Vec<u8> = Vec::new();
+                                        let mut s_pre: Vec<u8> = Vec::new();
+                                        if let Some(r_first) = r_bytes.to_vec().first() {
+                                            if *r_first > 127 {
+                                                r_pre.push(0);
+                                            }
+                                        }
+                                        if let Some(s_first) = s_bytes.to_vec().first() {
+                                            if *s_first > 127 {
+                                                s_pre.push(0);
+                                            }
+                                        }
+                                        let _ = asn1_rs::Integer::new(&[&r_pre[..], r_bytes].concat()[..]).write_der(&mut vec_signature);
+                                        let _ = asn1_rs::Integer::new(&[&s_pre[..], s_bytes].concat()[..]).write_der(&mut vec_signature);
+                                        let seq_signature = asn1_rs::Sequence::new(vec_signature.into());
+                                        match seq_signature.to_der_vec() {
+                                            Ok(der_bytes) => {
+                                                return format!("{}@{}@{}", app_key, hex::encode(enc_data), hex::encode(der_bytes));
+                                            },
+                                            Err(err) => logger::error!("error occured when asn1 signature bytes: {}", err),
+                                        }
+                                    },
+                                    Err(err) => logger::error!("error occured when sign data: {}", err),
+                                }
+                            },
+                            Err(err) => logger::error!("error occured when encrypt data: {}", err),
+                        }
+                    },
+                    _ => logger::error!("error occured when convert key bytes to key instance"),
+                }
+            },
+            _ => logger::error!("error occured when decode key from hex to bytes"),
+        }
+        String::from("")
+    }
+    /// 进行3des加密，key用字符串
+    pub fn encrypt_desede_default(data: &str, key: &str) -> String {
+        TokenUtil::encrypt_desede(data, TokenUtil::get_desede_key(key))
+    }
+    /// 进行3des加密
+    pub fn encrypt_desede(data: &str, key: Vec<u8>) -> String {
+        let cipher_vec: Vec<u8> = easydes::easydes::triple_des_ecb(&key, &mut data.as_bytes().to_vec(), easydes::easydes::Des::Encrypt);
+        base64::engine::general_purpose::STANDARD.encode(cipher_vec)
+    }
+    /// 获取3des加密用的key
+    fn get_desede_key(key: &str) -> Vec<u8> {
+        let key_md5 = md5::compute(key.as_bytes());
+        let mut key_bytes: Vec<u8> = vec![0; 24];
+        for i in 0..24 {
+            key_bytes[i] = key_md5[i % 16];
+        }
+        key_bytes
     }
 }
 

@@ -25,6 +25,8 @@ pub struct AppState {
     pub pdf_verify_dir: String,
     /// java执行参数文件目录
     pub java_args_dir: String,
+    /// 用户登录信息
+    pub user_info: serde_json::Value,
 }
 impl AppState {
     /// 初始化数据
@@ -255,5 +257,28 @@ impl AppState {
             },
             Err(err) => logger::error!("error occured when convert dir【{}】 to path: {}", dir, err),
         }
+    }
+    /// 获取用户登录信息
+    pub fn get_user_info(state: &Arc<Mutex<AppState>>) -> serde_json::Value {
+        match state.lock() {
+            Ok(app_state) => app_state.user_info.clone(),
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+                serde_json::json!("")
+            }
+        }
+    }
+    /// 设置用户登录信息
+    pub fn set_user_info(user_info: serde_json::Value, state: &Arc<Mutex<AppState>>) {
+        match state.lock() {
+            Ok(mut app_state) => app_state.user_info = user_info,
+            Err(err) => {
+                logger::error!("try to lock app state failed: {}", err);
+            }
+        }
+    }
+    /// 用户退出登录时调用
+    pub fn user_logout(state: &Arc<Mutex<AppState>>) {
+        AppState::set_user_info(serde_json::json!(""), state);
     }
 }
