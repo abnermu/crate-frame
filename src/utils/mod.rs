@@ -1,9 +1,10 @@
 use base64::Engine;
 use hmac::Mac;
 use log as logger;
-use std::{ffi::CStr, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}, collections::HashMap};
+use std::{ffi::CStr, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}, collections::HashMap, io::Cursor};
 use tauri::Manager;
 use asn1_rs::ToDer;
+use image::GenericImageView;
 
 /// token工具类
 pub struct TokenUtil;
@@ -510,5 +511,52 @@ impl ZhongZhaoUtil {
             "serviceUrl": ZhongZhaoUtil::DEFAULT_SERVICE_URL,
             "signatureSecret": ZhongZhaoUtil::DEFAULT_SIGNATURE_SECRET,
         })
+    }
+}
+
+/// 图片处理工具类
+pub struct ImageUtil;
+impl ImageUtil {
+    /// 图片缩放
+    pub fn resize_image(img: &str, max_width: f64) -> String {
+        match base64::engine::general_purpose::STANDARD.decode(img) {
+            Ok(img_bytes) => {
+                match image::ImageReader::new(Cursor::new(&img_bytes[..])).with_guessed_format() {
+                    Ok(img_reader) => {
+                        match img_reader.decode() {
+                            Ok(mut img_ins) => {
+                                let (ori_width, ori_height) = img_ins.dimensions();
+                                if ori_width as f64 > max_width {
+                                    let scale: f64 = max_width / ori_width as f64;
+                                    let scaled_width = ori_width as f64 * scale;
+                                    let scaled_height = ori_height as f64 * scale;
+                                    img_ins = img_ins.resize(scaled_width as u32, scaled_height as u32, image::imageops::FilterType::Lanczos3);
+                                    let mut scaled_img_bytes: Vec<u8> = Vec::new();
+                                    match img_ins.write_to(&mut Cursor::new(&mut scaled_img_bytes), image::ImageFormat::Png) {
+                                        Ok(_) => return base64::engine::general_purpose::STANDARD.encode(&scaled_img_bytes[..]),
+                                        Err(err) => {
+                                            logger::error!("write resized image to bytes failed: {}", err);
+                                        }
+                                    }
+                                }
+                                else {
+                                    logger::info!("the seal image no need to be resized");
+                                }
+                            },
+                            Err(err) => {
+                                logger::error!("get dynamic image instance failed: {}", err);
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        logger::error!("create image reader failed: {}", err);
+                    }
+                }
+            },
+            Err(err) => {
+                logger::error!("try to convert sealImage from base64 to bytes failed: {}", err);
+            }
+        }
+        img.to_string()
     }
 }
