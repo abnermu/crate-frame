@@ -1,7 +1,8 @@
 use serde::{Serialize, Deserialize};
-use std::{path::PathBuf, sync::{Arc, Mutex}};
+use std::{path::PathBuf, str::FromStr, sync::{Arc, Mutex}};
 use tauri::{AppHandle, State, Config};
 use crate::AppState;
+use log as logger;
 
 /// 响应code
 #[repr(i32)]
@@ -72,6 +73,9 @@ pub fn jy_frame_machine_code_check(state: State<'_, Arc<Mutex<AppState>>>) -> Re
                     if crate::SysUtil::license_check(&machine_code, entry.path().to_string_lossy().to_string().as_str()) {
                         return Ok(true);
                     }
+                    else {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
                 }
             }
         }
@@ -80,4 +84,28 @@ pub fn jy_frame_machine_code_check(state: State<'_, Arc<Mutex<AppState>>>) -> Re
     else {
         Ok(false)
     }
+}
+
+/// 导入算码文件
+#[tauri::command]
+pub fn jy_frame_machine_code_import(state: State<'_, Arc<Mutex<AppState>>>, lic_file: &str) -> Result<bool, String> {
+    let data_dir = crate::AppState::get_data_dir(&state);
+    let lic_dir: PathBuf = [data_dir.as_str(), "lic"].iter().collect();
+    if !lic_dir.exists() {
+        if let Err(err) = std::fs::create_dir_all(&lic_dir) {
+            logger::error!("failed make lic dir: {:?}", err);
+            return Err(String::from("算码文件导入失败"));
+        }
+    }
+    match PathBuf::from_str(lic_file) {
+        Ok(src_path) => {
+            let file_name = src_path.file_name().unwrap();
+            match std::fs::copy(&src_path, &[data_dir.as_str(), "lic", file_name.to_string_lossy().to_string().as_str()].iter().collect::<PathBuf>()) {
+                Ok(_) => return Ok(true),
+                Err(err) => logger::error!("failed copy lic_file: {:?}", err),
+            }
+        },
+        Err(err) => logger::error!("failed parse lic_file to a pathbuf: {:?}", err),
+    }
+    Err(String::from("算码文件导入失败"))
 }
