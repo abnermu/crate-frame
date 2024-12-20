@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use std::sync::{Arc, Mutex};
+use std::{path::PathBuf, sync::{Arc, Mutex}};
 use tauri::{AppHandle, State, Config};
 use crate::AppState;
 
@@ -58,4 +58,26 @@ pub fn jy_frame_local_port(state: State<'_, Arc<Mutex<AppState>>>) -> Result<u16
 pub fn jy_frame_config(app: AppHandle) -> Result<Config, String> {
     let config = app.config().clone();
     Ok(config)
+}
+
+/// 验证机器码有效性
+#[tauri::command]
+pub fn jy_frame_machine_code_check(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    if let Some(machine_code) = crate::SysUtil::get_machine_code() {
+        let data_dir = crate::AppState::get_data_dir(&state);
+        let lic_dir: PathBuf = [data_dir.as_str(), "lic"].iter().collect();
+        if let Ok(files) = std::fs::read_dir(lic_dir) {
+            for entry_result in files {
+                if let Ok(entry) = entry_result {
+                    if crate::SysUtil::license_check(&machine_code, entry.path().to_string_lossy().to_string().as_str()) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Err(machine_code)
+    }
+    else {
+        Ok(false)
+    }
 }

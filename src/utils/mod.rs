@@ -1,9 +1,10 @@
 use base64::Engine;
 use hmac::Mac;
 use log as logger;
-use std::{ffi::CStr, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}, collections::HashMap, io::Cursor};
+use sm3::Digest;
+use std::{collections::HashMap, ffi::CStr, io::{Cursor, Read}, os::raw::{c_char, c_long}, path::PathBuf, process::Command, str::FromStr, sync::{Arc, Mutex}};
 use tauri::Manager;
-use asn1_rs::ToDer;
+use asn1_rs::{ToDer, FromDer};
 use image::GenericImageView;
 
 /// token工具类
@@ -558,5 +559,246 @@ impl ImageUtil {
             }
         }
         img.to_string()
+    }
+}
+
+pub struct NetInterface {
+    pub name: String,
+    pub ipv4: String,
+    pub mac: String,
+}
+
+/// 系统相关工具类
+pub struct SysUtil;
+impl SysUtil {
+    /// 获取硬盘序列号
+    pub fn get_disk_sid() -> Option<String> {
+        if std::env::consts::OS == "macos" {
+            return SysUtil::get_disk_sid_mac();
+        }
+        else if std::env::consts::OS == "linux" {
+            return SysUtil::get_disk_sid_linux();
+        }
+        else {
+            return SysUtil::get_disk_sid_win();
+        }
+    }
+    /// windows环境获取硬盘序列号
+    pub fn get_disk_sid_win() -> Option<String> {
+        let mut cmd = Command::new("powershell");
+        match cmd.args(["-Command", "Get-WmiObject -Class Win32_DiskDrive | Select-Object -ExpandProperty SerialNumber"]).output() {
+            Ok(output) => {
+                if output.status.success() {
+                    return Some(String::from_utf8_lossy(&output.stdout).to_string());
+                }
+                else {
+                    logger::error!("[获取硬盘序列号]失败");
+                }
+            }
+            Err(err) => logger::error!("[获取硬盘序列号]执行命令行异常: {:?}", err),
+        }
+        None
+    }
+    /// mac环境获取硬盘序列号
+    pub fn get_disk_sid_mac() -> Option<String> {
+        None
+    }
+    /// linux环境获取硬盘序列号
+    pub fn get_disk_sid_linux() -> Option<String> {
+        None
+    }
+    /// 获取CPU序列号
+    pub fn get_cpu_sid() -> Option<String> {
+        if std::env::consts::OS == "macos" {
+            return SysUtil::get_cpu_sid_mac();
+        }
+        else if std::env::consts::OS == "linux" {
+            return SysUtil::get_cpu_sid_linux();
+        }
+        else {
+            return SysUtil::get_cpu_sid_win();
+        }
+    }
+    /// windows环境获取CPU序列号
+    pub fn get_cpu_sid_win() -> Option<String> {
+        let mut cmd = Command::new("powershell");
+        match cmd.args(["-Command", "Get-WmiObject -Class Win32_Processor | Select-Object -ExpandProperty ProcessorId"]).output() {
+            Ok(output) => {
+                if output.status.success() {
+                    return Some(String::from_utf8_lossy(&output.stdout).to_string());
+                }
+                else {
+                    logger::error!("[获取CPU序列号]失败");
+                }
+            }
+            Err(err) => logger::error!("[获取CPU序列号]执行命令行异常: {:?}", err),
+        }
+        None
+    }
+    /// mac环境获取CPU序列号
+    pub fn get_cpu_sid_mac() -> Option<String> {
+        None
+    }
+    /// linux环境获取CPU序列号
+    pub fn get_cpu_sid_linux() -> Option<String> {
+        None
+    }
+    /// 获取网卡信息
+    pub fn get_net_interface() -> Option<NetInterface> {
+        if std::env::consts::OS == "macos" {
+            return SysUtil::get_net_interface_mac();
+        }
+        else if std::env::consts::OS == "linux" {
+            return SysUtil::get_net_interface_linux();
+        }
+        else {
+            return SysUtil::get_net_interface_win();
+        }
+    }
+    /// windows环境获取网卡信息
+    pub fn get_net_interface_win() -> Option<NetInterface> {
+        let mut cmd = Command::new("powershell");
+        match cmd.args(["-Command", "Get-WmiObject -Class Win32_NetworkAdapter | Where-Object { $_.NetEnabled -eq $true } | Select-Object Name, MACAddress, @{Name=\"IPAddress\";Expression={(Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter \"Description = '$($_.Name)'\").IPAddress}}"]).output() {
+            Ok(output) => {
+                if output.status.success() {
+                    let network_info = String::from_utf8_lossy(&output.stdout).to_string();
+                    let reg_mac = regex::Regex::new(r"[\r\s]*([\w\d]{2}(:[\w\d]{2}){5})").unwrap();
+                    let reg_ip = regex::Regex::new(r"[\r\s]*(\d{1,3}(.\d{1,3}){3})").unwrap();
+                    let reg_ip_wrapper = regex::Regex::new(r"[\r\s]*\{.*\}").unwrap();
+                    let reg_virtual = regex::Regex::new(r"(?i)vethernet|virtual").unwrap();
+                    for item in network_info.split("\n").collect::<Vec<&str>>() {
+                        if reg_mac.is_match(item) && reg_ip.is_match(item) && reg_ip_wrapper.is_match(item) && !reg_virtual.is_match(item) {
+                            let mac = reg_mac.captures(item).unwrap().get(0).unwrap().as_str();
+                            let ip = reg_ip.captures(item).unwrap().get(0).unwrap().as_str();
+                            let item_noip = reg_ip_wrapper.replace(&item, "");
+                            let name = reg_mac.replace(&item_noip, "");
+                            return Some(NetInterface {
+                                name: name.to_string(),
+                                ipv4: ip.to_string(),
+                                mac: mac.to_string(),
+                            });
+                        }
+                    }
+                }
+                else {
+                    logger::error!("[获取网卡信息]失败");
+                }
+            }
+            Err(err) => logger::error!("[获取网卡信息]执行命令行异常: {:?}", err),
+        }
+        None
+    }
+    /// mac环境获取网卡信息
+    pub fn get_net_interface_mac() -> Option<NetInterface> {
+        None
+    }
+    /// linux获取网卡信息
+    pub fn get_net_interface_linux() -> Option<NetInterface> {
+        None
+    }
+    /// 获取机器码
+    pub fn get_machine_code() -> Option<String> {
+        let diskid = SysUtil::get_disk_sid();
+        let cpuid = SysUtil::get_cpu_sid();
+        let net_interface = SysUtil::get_net_interface();
+        if diskid.is_some() && cpuid.is_some() && net_interface.is_some() {
+            let mut wrapper: Vec<u8> = Vec::new();
+            let _ = asn1_rs::Utf8String::new(diskid.unwrap().as_str()).write_der(&mut wrapper);
+            let _ = asn1_rs::Utf8String::new(cpuid.unwrap().as_str()).write_der(&mut wrapper);
+            let _ = asn1_rs::Utf8String::new(&net_interface.unwrap().mac).write_der(&mut wrapper);
+            let seq_wrapper = asn1_rs::Sequence::new(wrapper.into());
+            match seq_wrapper.to_der_vec() {
+                Ok(seq_bytes) => {
+                    let mut hasher = sm3::Sm3::new();
+                    hasher.update(seq_bytes);
+                    let code_bytes = hasher.finalize();
+                    return Some(StringUtil::bytes_to_hex(&code_bytes[..]));
+                },
+                Err(err) => logger::error!("生成机器码异常：{:?}", err),
+            }
+        }
+        None
+    }
+    /// 验证机器码有效性
+    pub fn license_check(machine_str: &str, lic_path: &str) -> bool {
+        match hex::decode(machine_str) {
+            Ok(machine_bytes) => {
+                match std::fs::File::open(lic_path) {
+                    Ok(mut file) => {
+                        let mut buffer: Vec<u8> = Vec::new();
+                        match file.read_to_end(&mut buffer) {
+                            Ok(_) => {
+                                match asn1_rs::Sequence::from_der_and_then(&buffer, |bytes| {
+                                    match asn1_rs::OctetString::from_der(bytes) {
+                                        Ok((bytes, oct_machinecode)) => {
+                                            match asn1_rs::OctetString::from_der(bytes) {
+                                                Ok((bytes, oct_expire)) => {
+                                                    match asn1_rs::OctetString::from_der(bytes) {
+                                                        Ok((bytes, oct_sig)) => {
+                                                            let mut machine_code: Vec<u8> = Vec::new();
+                                                            let mut expire: Vec<u8> = Vec::new();
+                                                            let mut signature: Vec<u8> = Vec::new();
+                                                            machine_code.extend_from_slice(oct_machinecode.as_cow());
+                                                            expire.extend_from_slice(oct_expire.as_cow());
+                                                            signature.extend_from_slice(oct_sig.as_cow());
+                                                            Ok((bytes, (machine_code, expire, signature)))
+                                                        },
+                                                        Err(err) => Err(err),
+                                                    }
+                                                },
+                                                Err(err) => Err(err),
+                                            }
+                                        },
+                                        Err(err) => Err(err),
+                                    }
+                                }) {
+                                    Ok((_bytes, (machine_code, expire, signature))) => {
+                                        if machine_str != hex::encode(&machine_code) {
+                                            logger::error!("机器码与算码不匹配");
+                                        }
+                                        else {
+                                            let expire_final = String::from_utf8_lossy(&expire).to_string();
+                                            let expire_trim = &expire_final[3..(expire_final.len() - 3)];
+                                            let expire_reverse = expire_trim.chars().rev().collect::<String>();
+                                            match expire_reverse.parse::<i64>() {
+                                                Ok(expire_time) => {
+                                                    if expire_time < chrono::Local::now().timestamp() {
+                                                        logger::error!("算码已过期");
+                                                    }
+                                                    else {
+                                                        let pub_key = "0406fa6fa7bf9c00e88902538633878560a000eb7188e53bc017d2794d9de303e0d99aeeccc40ba83b51254391c789bef1748103f0fc626edc2beb8899238e40d0";
+                                                        match hex::decode(pub_key) {
+                                                            Ok(key_bytes) => {
+                                                                match gm_sm2::key::Sm2PublicKey::new(&key_bytes) {
+                                                                    Ok(key) => {
+                                                                        match key.verify(None, &machine_bytes, &signature) {
+                                                                            Ok(()) => return true,
+                                                                            Err(err) => println!("算码验证失败：{:?}", err),
+                                                                        }
+                                                                    },
+                                                                    Err(err) => logger::error!("key转换失败：{:?}", err),
+                                                                }
+                                                            },
+                                                            Err(err) => logger::error!("key转换失败：{:?}", err),
+                                                        }
+                                                    }
+                                                }
+                                                ,
+                                                Err(err) => logger::error!("time convert failed: {:?}", err),
+                                            }
+                                        }
+                                    },
+                                    Err(err) => logger::error!("算码解析失败：{:?}", err),
+                                }
+                            },
+                            Err(err) => logger::error!("算码读取失败：{:?}", err),
+                        }
+                    },
+                    Err(err) => logger::error!("算码读取失败：{:?}", err),
+                }
+            },
+            Err(err) => logger::error!("机器码解析失败：{:?}", err),
+        }
+        false
     }
 }
